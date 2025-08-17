@@ -1,68 +1,41 @@
-# IMG-to-ASCII
+# MG-to-ASCII
 
-Convert images to colored ASCII art in your terminal or export as HTML.
+Convert any image into colorful ASCII art. This tool takes your photos and turns them into text characters while keeping all the original colors, creating stunning visual art that works in web browsers.
 
-## Features
+## Quick Start
 
-- Adjustable output resolution (`--width`, `--height`)
-- Character set selection (`--charset`)
-- Color modes: Grayscale, ANSI 256-color, TrueColor RGB
-- Export to HTML with preserved color and spacing
+**Windows:**
 
-## Requirements
-
-- Python 3.8+
-- [Pillow](https://pypi.org/project/Pillow/)
-- [numpy](https://pypi.org/project/numpy/)
-
-Install dependencies:
-
-```fish
-pip install pillow numpy
+```bash
+run.bat
 ```
 
-## Usage
+**Linux/Mac:**
 
-### Terminal Output (ANSI 256-color)
-
-```fish
-python main.py image.png --width 100 --colormode ansi
+```bash
+./run.sh
 ```
 
-### Terminal Output (TrueColor RGB)
+Open your browser, upload an image, and adjust the sliders to customize your ASCII art. Export as HTML or view directly in the browser.
 
-```fish
-python main.py image.png --width 100 --colormode rgb
-```
+## 🎨 Gallery Showcase
 
-### Grayscale Output
+### Example 1
 
-```fish
-python main.py image.png --width 100 --colormode grayscale
-```
+![Image 3](images/3.png)
 
-### Custom Character Set
+### Example 2
 
-```fish
-python main.py image.png --width 100 --charset " .:-=+*#%@"
-```
+![Image 2](images/2.png)
 
-### Export as HTML
+### Example 3
 
-```fish
-python main.py image.png --width 100 --colormode rgb --html output.html
-```
+![Image 4](images/4.png)
 
-## Notes
+### Example 4
 
-- The image file must exist in the current directory or provide the correct path.
-- For best color, use `--colormode rgb`.
-- Adjust `--width` and `--height` for desired output size.
-
-## Example
-
-![Example](siddharth.png)
+![Image 5](images/5.png)
 
 ---
 
-Created by sudo-sidd
+**Created by sudo-sidd**

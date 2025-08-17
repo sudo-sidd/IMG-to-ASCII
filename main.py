@@ -14,13 +14,16 @@ def get_args():
     parser.add_argument("--charset", type=str, default=DEFAULT_CHARS, help="Characters to use for ASCII art")
     parser.add_argument("--colormode", choices=["grayscale", "ansi", "rgb"], default="ansi", help="Color mode")
     parser.add_argument("--html", type=str, help="Export as HTML file")
+    parser.add_argument("--keep-size", action="store_true", help="Use original image pixel dimensions (no resizing, 1 char per pixel)")
     return parser.parse_args()
 
-def resize_image(img, width, height):
+def resize_image(img, width, height, keep_size=False):
+    if keep_size:
+        return img  # preserve original dimensions
     w, h = img.size
     aspect_ratio = h / w
     if height is None:
-        height = int(width * aspect_ratio * 0.55)  # 0.55 compensates for font aspect ratio
+        height = int(width * aspect_ratio * 0.55)  # font aspect ratio compensation
     return img.resize((width, height))
 
 def map_pixels_to_chars(img, charset):
@@ -86,7 +89,7 @@ def ascii_art_html(img, charset, colormode):
 def main():
     args = get_args()
     img = Image.open(args.image)
-    img = resize_image(img, args.width, args.height)
+    img = resize_image(img, args.width, args.height, getattr(args, "keep_size", False))
     if args.html:
         html = ascii_art_html(img, args.charset, args.colormode)
         with open(args.html, "w") as f:

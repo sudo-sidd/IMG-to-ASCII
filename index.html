@@ -1,0 +1,766 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>ASCII Shader Converter — WebGL (Three.js)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  html,body { height:100%; margin:0; background:#050507; color:#cbd5e1; font-family: monospace; }
+  #ui { position: absolute; z-index: 30; left: 12px; top: 12px; background: rgba(0,0,0,0.8); padding:12px; border-radius:8px; backdrop-filter: blur(4px); max-height: calc(100vh - 24px); overflow-y: auto; }
+  label { display:block; margin:6px 0 4px; font-size:13px; color:#cbd5e1; }
+  input[type=range] { width:220px; }
+  button, select, input { font-family: monospace; font-size:13px; }
+  #drop { width:280px; height:42px; display:flex; align-items:center; justify-content:center; border:1px dashed rgba(255,255,255,0.08); margin-bottom:8px; color: #9ca3af; cursor:pointer; }
+  
+  #mainContainer { display: flex; width: 100vw; height: 100vh; }
+  #leftPanel { flex: 1; display: flex; flex-direction: column; }
+  #rightPanel { flex: 1; display: flex; flex-direction: column; }
+  
+  #originalContainer, #asciiContainer { 
+    flex: 1; 
+    position: relative; 
+    overflow: hidden; 
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  
+  #originalCanvas, #asciiCanvas { 
+    width: 100%; 
+    height: 100%; 
+    object-fit: contain; 
+    object-position: center;
+    background: #111;
+    display: block;
+  }
+  
+  .panelLabel {
+    background: rgba(0,0,0,0.8);
+    color: #cbd5e1;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-weight: bold;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  
+  footer { position: absolute; right: 12px; bottom:12px; z-index:40; color:#9ca3af; font-size:12px; }
+  .themeBtn { margin-right:6px; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="drop">Drop image / video here (or click)</div>
+  <input id="file" type="file" accept="video/*,image/*" style="display:none"/>
+  <label>Cell size: <span id="cellVal">8</span> px</label>
+  <input id="cell" type="range" min="4" max="24" value="8" />
+  <label>Colorize: <input id="colorize" type="checkbox" checked /></label>
+  <label>Gamma: <input id="gamma" type="range" min="0.2" max="2.5" step="0.05" value="1.0" /></label>
+  <label>Edge Threshold: <input id="edgeThreshold" type="range" min="0.01" max="0.5" step="0.01" value="0.1" /></label>
+  <label>Draw Edges: <input id="drawEdges" type="checkbox" checked /></label>
+  <label>Draw Fill: <input id="drawFill" type="checkbox" checked /></label>
+  <label>Theme:
+    <select id="theme">
+      <option value="none">None (Pure B&W)</option>
+      <optgroup label="Dark Themes">
+        <option value="onedark">OneDark</option>
+        <option value="catppuccin">Catppuccin</option>
+        <option value="solarized">Solarized</option>
+        <option value="gruvbox">Gruvbox</option>
+      </optgroup>
+      <optgroup label="High Contrast">
+        <option value="highcontrast">High Contrast</option>
+        <option value="highcontrastinv">High Contrast Inverted</option>
+        <option value="monochrome">Monochrome</option>
+        <option value="greyscale">Greyscale</option>
+      </optgroup>
+      <optgroup label="Soft Themes">
+        <option value="cream">Cream</option>
+        <option value="pastel">Pastel Blue</option>
+        <option value="sepia">Sepia</option>
+        <option value="sage">Sage Green</option>
+        <option value="lavender">Lavender</option>
+      </optgroup>
+    </select>
+  </label>
+  <div style="margin-top:8px;">
+    <button id="playPause">Play/Pause</button>
+    <button id="snapshot">Save</button>
+  </div>
+</div>
+
+<div id="mainContainer">
+  <div id="leftPanel">
+    <div class="panelLabel">Original</div>
+    <div id="originalContainer">
+      <canvas id="originalCanvas"></canvas>
+    </div>
+  </div>
+  <div id="rightPanel">
+    <div class="panelLabel">ASCII Preview</div>
+    <div id="asciiContainer">
+      <canvas id="asciiCanvas"></canvas>
+    </div>
+  </div>
+</div>
+<footer>ASCII Shader Converter — WebGL | Drag a file to start</footer>
+
+<!-- Three.js (r132+ recommended) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+
+<script>
+/* ==== Config and utility helpers ==== */
+const THEMES = {
+  none: { bg: '#000000', fg: '#ffffff', accent: '#808080' }, // No color theme - pure black/white
+  onedark: { bg: '#282c34', fg: '#abb2bf', accent: '#61afef' },
+  catppuccin: { bg: '#1e1e2e', fg: '#cdd6f4', accent: '#f5c2e7' },
+  solarized: { bg: '#002b36', fg: '#93a1a1', accent: '#b58900' },
+  gruvbox: { bg: '#282828', fg: '#ebdbb2', accent: '#fabd2f' },
+  // High contrast themes
+  highcontrast: { bg: '#000000', fg: '#ffffff', accent: '#ffffff' },
+  highcontrastinv: { bg: '#ffffff', fg: '#000000', accent: '#000000' },
+  // Monochrome themes
+  monochrome: { bg: '#1a1a1a', fg: '#e0e0e0', accent: '#888888' },
+  greyscale: { bg: '#2d2d2d', fg: '#d3d3d3', accent: '#a0a0a0' },
+  // Softer themes - corrected for better contrast
+  cream: { bg: '#faf8f0', fg: '#5c4317', accent: '#8b6914' },
+  pastel: { bg: '#f5f9ff', fg: '#2c5282', accent: '#3182ce' },
+  sepia: { bg: '#f7f5f0', fg: '#4a3528', accent: '#744c3c' },
+  sage: { bg: '#f8faf6', fg: '#2d5016', accent: '#38a169' },
+  lavender: { bg: '#faf8ff', fg: '#44337a', accent: '#6b46c1' }
+};
+
+const fileInput = document.getElementById('file');
+const drop = document.getElementById('drop');
+const originalCanvas = document.getElementById('originalCanvas');
+const asciiCanvas = document.getElementById('asciiCanvas');
+const playPauseBtn = document.getElementById('playPause');
+const snapshotBtn = document.getElementById('snapshot');
+
+let currentFile = null;
+
+/* ==== Three.js setup ==== */
+let renderer, scene, camera, quadMesh, asciiMaterial;
+let originalRenderer, originalScene, originalCamera, originalQuad;
+let videoTexture = null;
+let imageTexture = null;
+let inputIsVideo = false;
+let vidElement = null;
+let clock = new THREE.Clock();
+
+function initThree() {
+  // ASCII renderer (right panel)
+  renderer = new THREE.WebGLRenderer({ canvas: asciiCanvas, antialias: false, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(asciiCanvas.clientWidth, asciiCanvas.clientHeight, false);
+
+  scene = new THREE.Scene();
+  camera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+
+  // Original renderer (left panel)
+  originalRenderer = new THREE.WebGLRenderer({ canvas: originalCanvas, antialias: false });
+  originalRenderer.setPixelRatio(window.devicePixelRatio || 1);
+  originalRenderer.setSize(originalCanvas.clientWidth, originalCanvas.clientHeight, false);
+
+  originalScene = new THREE.Scene();
+  originalCamera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+
+  const plane = new THREE.PlaneGeometry(2,2);
+  asciiMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uInput: { value: null },
+      uEdgesASCII: { value: null },
+      uFillASCII: { value: null },
+      uCell: { value: 8.0 },
+      uRes: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      uImageRes: { value: new THREE.Vector2(1.0, 1.0) },
+      uColorize: { value: 1.0 },
+      uPalette0: { value: new THREE.Vector3(0.282,0.2,0.2) },
+      uPalette1: { value: new THREE.Vector3(0.8,0.8,0.8) },
+      uGamma: { value: 1.0 },
+      uTime: { value: 0.0 },
+      uEdgeThreshold: { value: 0.1 },
+      uDrawEdges: { value: true },
+      uDrawFill: { value: true }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){ vUv = uv; gl_Position = vec4(position,1.0); }
+    `,
+    fragmentShader: `
+      precision highp float;
+      uniform sampler2D uInput;
+      uniform sampler2D uEdgesASCII;
+      uniform sampler2D uFillASCII;
+      uniform vec2 uRes;
+      uniform vec2 uImageRes;
+      uniform float uCell;
+      uniform float uColorize;
+      uniform vec3 uPalette0;
+      uniform vec3 uPalette1;
+      uniform float uGamma;
+      uniform float uTime;
+      uniform float uEdgeThreshold;
+      uniform bool uDrawEdges;
+      uniform bool uDrawFill;
+      varying vec2 vUv;
+
+      #define PI 3.14159265358979323846
+
+      // Luminance calculation like Acerola's
+      float luminance(vec3 color) {
+        return max(0.00001, dot(color, vec3(0.2127, 0.7152, 0.0722)));
+      }
+
+      // Simple edge detection using Sobel operator
+      vec2 sobel(vec2 coord, vec2 resolution) {
+        vec2 texelSize = 1.0 / resolution;
+        
+        float tl = luminance(texture2D(uInput, coord + vec2(-texelSize.x, -texelSize.y)).rgb);
+        float tm = luminance(texture2D(uInput, coord + vec2(0.0, -texelSize.y)).rgb);
+        float tr = luminance(texture2D(uInput, coord + vec2(texelSize.x, -texelSize.y)).rgb);
+        float ml = luminance(texture2D(uInput, coord + vec2(-texelSize.x, 0.0)).rgb);
+        float mr = luminance(texture2D(uInput, coord + vec2(texelSize.x, 0.0)).rgb);
+        float bl = luminance(texture2D(uInput, coord + vec2(-texelSize.x, texelSize.y)).rgb);
+        float bm = luminance(texture2D(uInput, coord + vec2(0.0, texelSize.y)).rgb);
+        float br = luminance(texture2D(uInput, coord + vec2(texelSize.x, texelSize.y)).rgb);
+
+        float sobelX = (tr + 2.0*mr + br) - (tl + 2.0*ml + bl);
+        float sobelY = (bl + 2.0*bm + br) - (tl + 2.0*tm + tr);
+        
+        return vec2(sobelX, sobelY);
+      }
+
+      void main(){
+        // Use direct UV coordinates to maintain exact input resolution and aspect ratio
+        vec2 pixelCoord = vUv * uImageRes;
+        
+        // Get the cell position using uCell size
+        ivec2 cellCoord = ivec2(floor(pixelCoord / uCell));
+        
+        // Position within the cell (0 to uCell-1)
+        ivec2 localCoord = ivec2(mod(pixelCoord, uCell));
+        
+        // Sample color at cell center for luminance calculation
+        vec2 cellCenterUV = (vec2(cellCoord) + 0.5) * uCell / uImageRes;
+        vec3 cellColor = texture2D(uInput, cellCenterUV).rgb;
+        float cellLuminance = pow(luminance(cellColor), 1.0/uGamma); // Apply gamma
+        
+        // Edge detection
+        vec2 gradient = sobel(cellCenterUV, uImageRes);
+        float edgeMagnitude = length(gradient);
+        float theta = atan(gradient.y, gradient.x);
+        
+        // Quantize edge direction to 4 directions (like Acerola's shader)
+        int direction = -1;
+        if (edgeMagnitude > uEdgeThreshold) {
+          float absTheta = abs(theta) / PI;
+          
+          if ((absTheta >= 0.0 && absTheta < 0.05) || (absTheta > 0.9 && absTheta <= 1.0)) {
+            direction = 0; // VERTICAL (note: Acerola's mapping)
+          } else if (absTheta > 0.45 && absTheta < 0.55) {
+            direction = 1; // HORIZONTAL
+          } else if (absTheta > 0.05 && absTheta < 0.45) {
+            direction = theta > 0.0 ? 3 : 2; // DIAGONAL 1
+          } else if (absTheta > 0.55 && absTheta < 0.9) {
+            direction = theta > 0.0 ? 2 : 3; // DIAGONAL 2
+          }
+        }
+        
+        vec3 ascii = vec3(0.0);
+        
+        if (direction >= 0 && uDrawEdges) {
+          // Sample from edge ASCII texture using pixel coordinates
+          // Scale localCoord to 8x8 range for texture sampling
+          vec2 scaledLocal = vec2(localCoord) * 8.0 / uCell;
+          vec2 edgeTexCoord = vec2(scaledLocal.x + float(direction) * 8.0, 8.0 - scaledLocal.y);
+          ascii = texture2D(uEdgesASCII, edgeTexCoord / vec2(40.0, 8.0)).rgb;
+        } else if (uDrawFill) {
+          // Sample from fill ASCII texture based on luminance
+          // Use direct luminance mapping - bright areas get sparse characters, dark areas get dense characters
+          float quantizedLum = clamp(floor(cellLuminance * 10.0), 0.0, 9.0);
+          vec2 scaledLocal = vec2(localCoord) * 8.0 / uCell;
+          vec2 fillTexCoord = vec2(scaledLocal.x + quantizedLum * 8.0, scaledLocal.y);
+          ascii = texture2D(uFillASCII, fillTexCoord / vec2(80.0, 8.0)).rgb;
+        }
+        
+        // Color mapping (like Acerola's lerp)
+        vec3 bgColor = uPalette0;
+        vec3 fgColor = mix(uPalette1, cellColor * uColorize, uColorize);
+        vec3 finalColor = mix(bgColor, fgColor, ascii.r);
+        
+        gl_FragColor = vec4(finalColor, 1.0);
+      }
+    `
+  });
+
+  quadMesh = new THREE.Mesh(plane, asciiMaterial);
+  scene.add(quadMesh);
+
+  // Simple material for original image display with aspect ratio preservation
+  const originalMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uTexture: { value: null },
+      uAspect: { value: 1.0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){ 
+        vUv = uv; 
+        gl_Position = vec4(position, 1.0); 
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uTexture;
+      uniform float uAspect;
+      varying vec2 vUv;
+      
+      void main(){
+        // Center UV and apply aspect ratio correction
+        vec2 centeredUV = (vUv - 0.5);
+        
+        // Scale UV to fit image aspect ratio within container
+        if (uAspect > 1.0) {
+          // Wide image - scale vertically
+          centeredUV.y *= uAspect;
+        } else {
+          // Tall image - scale horizontally  
+          centeredUV.x /= uAspect;
+        }
+        
+        centeredUV += 0.5;
+        
+        // Check bounds and sample texture
+        if (centeredUV.x < 0.0 || centeredUV.x > 1.0 || centeredUV.y < 0.0 || centeredUV.y > 1.0) {
+          gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        } else {
+          gl_FragColor = texture2D(uTexture, centeredUV);
+        }
+      }
+    `
+  });
+  originalQuad = new THREE.Mesh(plane, originalMaterial);
+  originalScene.add(originalQuad);
+
+  // Load the original AcerolaFX ASCII textures
+  const textureLoader = new THREE.TextureLoader();
+  
+  // Load edges ASCII texture
+  const edgesTexture = textureLoader.load('./edgesASCII.png', function(texture) {
+    texture.minFilter = THREE.NearestFilter;
+    texture.magFilter = THREE.NearestFilter;
+    texture.needsUpdate = true;
+    asciiMaterial.uniforms.uEdgesASCII.value = texture;
+  });
+  
+  // Load fill ASCII texture  
+  const fillTexture = textureLoader.load('./fillASCII.png', function(texture) {
+    texture.minFilter = THREE.NearestFilter;
+    texture.magFilter = THREE.NearestFilter;
+    texture.needsUpdate = true;
+    asciiMaterial.uniforms.uFillASCII.value = texture;
+  });
+
+  // Create a default test texture when no input is loaded
+  createDefaultTexture();
+
+  window.addEventListener('resize', onResize);
+  
+  // Add ResizeObserver to handle canvas container resizing
+  const resizeObserver = new ResizeObserver(() => {
+    onResize();
+  });
+  resizeObserver.observe(asciiCanvas.parentElement);
+  resizeObserver.observe(originalCanvas.parentElement);
+  
+  onResize();
+  animate();
+}
+
+function createDefaultTexture() {
+  // Create a simple gradient test texture
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  
+  // Create a gradient from black to white
+  const gradient = ctx.createLinearGradient(0, 0, 256, 256);
+  gradient.addColorStop(0, '#000000');
+  gradient.addColorStop(0.5, '#808080');
+  gradient.addColorStop(1, '#ffffff');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 256);
+  
+  // Add some color patches for testing
+  ctx.fillStyle = '#ff0000';
+  ctx.fillRect(50, 50, 50, 50);
+  ctx.fillStyle = '#00ff00';
+  ctx.fillRect(150, 50, 50, 50);
+  ctx.fillStyle = '#0000ff';
+  ctx.fillRect(100, 150, 50, 50);
+  
+  const defaultTexture = new THREE.CanvasTexture(canvas);
+  defaultTexture.needsUpdate = true;
+  
+  // Set default image resolution
+  asciiMaterial.uniforms.uImageRes.value.set(256, 256);
+  
+  // Set texture for both ASCII and original display
+  asciiMaterial.uniforms.uInput.value = defaultTexture;
+  originalQuad.material.uniforms.uTexture.value = defaultTexture;
+  originalQuad.material.uniforms.uAspect.value = 1.0; // Square aspect ratio
+  originalQuad.material.needsUpdate = true;
+}
+
+function onResize(){
+  const asciiRect = asciiCanvas.getBoundingClientRect();
+  const originalRect = originalCanvas.getBoundingClientRect();
+  
+  // For original canvas, always match display size for proper scaling
+  originalRenderer.setSize(originalRect.width, originalRect.height, false);
+  
+  // For ASCII canvas, use image resolution if available, otherwise use display size
+  const imageRes = asciiMaterial.uniforms.uImageRes.value;
+  if (imageRes.x > 1 && imageRes.y > 1) {
+    // Set canvas to exact image resolution - CSS will handle the scaling
+    renderer.setSize(imageRes.x, imageRes.y, false);
+    asciiMaterial.uniforms.uRes.value.set(imageRes.x, imageRes.y);
+  } else {
+    // Fallback to display size
+    renderer.setSize(asciiRect.width, asciiRect.height, false);
+    asciiMaterial.uniforms.uRes.value.set(asciiRect.width, asciiRect.height);
+  }
+}
+
+/* ==== Input handling: drag & drop & file choose ==== */
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.style.borderColor='rgba(255,255,255,0.18)'; });
+drop.addEventListener('dragleave', ()=>{ drop.style.borderColor='rgba(255,255,255,0.08)'; });
+drop.addEventListener('drop', (e)=>{
+  e.preventDefault();
+  drop.style.borderColor='rgba(255,255,255,0.08)';
+  const f = e.dataTransfer.files[0];
+  if(f) loadFile(f);
+});
+fileInput.addEventListener('change', (e)=>{ const f = e.target.files[0]; if(f) loadFile(f); });
+
+function loadFile(file){
+  currentFile = file;
+  const url = URL.createObjectURL(file);
+  if(file.type.startsWith('video/')){
+    loadVideo(url);
+  } else if(file.type.startsWith('image/')){
+    loadImage(url);
+  } else {
+    alert('Unsupported file type: image or video required.');
+  }
+}
+
+/* ==== Video path ==== */
+function loadVideo(src){
+  // cleanup previous
+  if(vidElement){ vidElement.pause(); vidElement.src = ''; vidElement.remove(); vidElement = null; }
+  vidElement = document.createElement('video');
+  vidElement.src = src;
+  vidElement.muted = true;
+  vidElement.loop = true;
+  vidElement.crossOrigin = 'anonymous';
+  vidElement.playsInline = true;
+  vidElement.autoplay = true;
+  vidElement.style.display = 'none';
+  document.body.appendChild(vidElement);
+  vidElement.addEventListener('canplay', ()=>{
+    inputIsVideo = true;
+    if(videoTexture) videoTexture.dispose();
+    videoTexture = new THREE.VideoTexture(vidElement);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    
+    // Update image resolution uniform
+    asciiMaterial.uniforms.uImageRes.value.set(vidElement.videoWidth, vidElement.videoHeight);
+    
+    // Calculate aspect ratio for original display
+    const aspectRatio = vidElement.videoWidth / vidElement.videoHeight;
+    
+    // Set texture for both ASCII and original display
+    asciiMaterial.uniforms.uInput.value = videoTexture;
+    originalQuad.material.uniforms.uTexture.value = videoTexture;
+    originalQuad.material.uniforms.uAspect.value = aspectRatio;
+    originalQuad.material.needsUpdate = true;
+    
+    // Resize canvases to match new image resolution
+    onResize();
+    
+    vidElement.play();
+    drop.textContent = 'Video loaded — playing (click Play/Pause to control)';
+  });
+}
+
+/* ==== Image path ==== */
+function loadImage(src){
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = ()=> {
+    inputIsVideo = false;
+    if(imageTexture) imageTexture.dispose();
+    
+    // Update image resolution uniform
+    asciiMaterial.uniforms.uImageRes.value.set(img.width, img.height);
+    
+    // Calculate aspect ratio for original display
+    const aspectRatio = img.width / img.height;
+    
+    // Create a canvas to ensure proper texture creation
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    
+    imageTexture = new THREE.CanvasTexture(canvas);
+    imageTexture.minFilter = THREE.LinearFilter;
+    imageTexture.magFilter = THREE.LinearFilter;
+    imageTexture.needsUpdate = true;
+    
+    // Set texture for both ASCII and original display
+    asciiMaterial.uniforms.uInput.value = imageTexture;
+    originalQuad.material.uniforms.uTexture.value = imageTexture;
+    originalQuad.material.uniforms.uAspect.value = aspectRatio;
+    originalQuad.material.needsUpdate = true;
+    
+    // Resize canvases to match new image resolution
+    onResize();
+    
+    drop.textContent = 'Image loaded';
+  };
+  img.onerror = (e) => {
+    console.error('Failed to load image:', e);
+    drop.textContent = 'Error loading image';
+  };
+  img.src = src;
+}
+
+/* ==== UI controls wiring ==== */
+const cellRange = document.getElementById('cell');
+const cellVal = document.getElementById('cellVal');
+const colorizeCheckbox = document.getElementById('colorize');
+const gammaRange = document.getElementById('gamma');
+const edgeThresholdRange = document.getElementById('edgeThreshold');
+const drawEdgesCheckbox = document.getElementById('drawEdges');
+const drawFillCheckbox = document.getElementById('drawFill');
+const themeSelect = document.getElementById('theme');
+
+cellRange.addEventListener('input', ()=>{
+  const v = Number(cellRange.value);
+  cellVal.textContent = v;
+  asciiMaterial.uniforms.uCell.value = v;
+});
+
+colorizeCheckbox.addEventListener('change', ()=>{
+  const isColorized = colorizeCheckbox.checked;
+  asciiMaterial.uniforms.uColorize.value = isColorized ? 1.0 : 0.0;
+  
+  // If user unchecks colorize while "none" theme is selected, keep it as pure B&W
+  if (!isColorized && themeSelect.value === 'none') {
+    asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0); // Pure black
+    asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1); // Pure white
+  }
+});
+
+gammaRange.addEventListener('input', ()=> asciiMaterial.uniforms.uGamma.value = Number(gammaRange.value));
+
+edgeThresholdRange.addEventListener('input', ()=> asciiMaterial.uniforms.uEdgeThreshold.value = Number(edgeThresholdRange.value));
+
+drawEdgesCheckbox.addEventListener('change', ()=>{
+  asciiMaterial.uniforms.uDrawEdges.value = drawEdgesCheckbox.checked;
+});
+
+drawFillCheckbox.addEventListener('change', ()=>{
+  asciiMaterial.uniforms.uDrawFill.value = drawFillCheckbox.checked;
+});
+
+themeSelect.addEventListener('change', ()=>{
+  const selectedTheme = themeSelect.value;
+  const p = THEMES[selectedTheme];
+  
+  if (selectedTheme === 'none') {
+    // No color theme - use pure black and white, disable colorization
+    asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0); // Pure black background
+    asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1); // Pure white foreground
+    asciiMaterial.uniforms.uColorize.value = 0.0; // Disable colorization
+    document.getElementById('colorize').checked = false;
+  } else {
+    // Apply selected theme colors
+    asciiMaterial.uniforms.uPalette0.value.set(
+      parseInt(p.bg.slice(1,3),16)/255,
+      parseInt(p.bg.slice(3,5),16)/255,
+      parseInt(p.bg.slice(5,7),16)/255
+    );
+    asciiMaterial.uniforms.uPalette1.value.set(
+      parseInt(p.fg.slice(1,3),16)/255,
+      parseInt(p.fg.slice(3,5),16)/255,
+      parseInt(p.fg.slice(5,7),16)/255
+    );
+    // Re-enable colorization if it was disabled
+    if (asciiMaterial.uniforms.uColorize.value === 0.0) {
+      asciiMaterial.uniforms.uColorize.value = 1.0;
+      document.getElementById('colorize').checked = true;
+    }
+  }
+});
+
+/* ==== animate loop ==== */
+function animate(){
+  requestAnimationFrame(animate);
+  asciiMaterial.uniforms.uTime.value = clock.getElapsedTime();
+  
+  // update video texture if video
+  if(inputIsVideo && videoTexture){
+    videoTexture.needsUpdate = true;
+  }
+  
+  // Render both canvases
+  originalRenderer.render(originalScene, originalCamera);
+  renderer.render(scene, camera);
+}
+initThree();
+
+/* ==== Playback controls ==== */
+playPauseBtn.addEventListener('click', ()=>{
+  if(!vidElement || !inputIsVideo) return;
+  if(vidElement.paused){ 
+    vidElement.play(); 
+    playPauseBtn.textContent='Pause'; 
+  } else { 
+    vidElement.pause(); 
+    playPauseBtn.textContent='Play'; 
+  }
+});
+
+snapshotBtn.addEventListener('click', ()=>{
+  if (inputIsVideo && videoTexture) {
+    // Save entire video as MP4 for videos
+    exportVideoAsMP4();
+  } else {
+    // Save as PNG for images
+    const data = asciiCanvas.toDataURL('image/png');
+    const a = document.createElement('a'); 
+    a.href = data; 
+    a.download = 'ascii_snapshot.png'; 
+    a.click();
+  }
+});
+
+// Video export functionality
+async function exportVideoAsMP4() {
+  if (!vidElement) return;
+  
+  // Show progress
+  snapshotBtn.textContent = 'Processing...';
+  snapshotBtn.disabled = true;
+  
+  try {
+    // Get video duration and dimensions
+    const duration = vidElement.duration;
+    const fps = 30;
+    const totalFrames = Math.ceil(duration * fps);
+    
+    // Create MediaRecorder for the export
+    const canvasStream = asciiCanvas.captureStream(fps);
+    const recordedBlobs = [];
+    
+    let mediaRecorder;
+    let actualMimeType = '';
+    
+    // Check what formats are actually supported
+    const mp4Supported = MediaRecorder.isTypeSupported('video/mp4;codecs=h264');
+    const webmVP9Supported = MediaRecorder.isTypeSupported('video/webm;codecs=vp9');
+    const webmVP8Supported = MediaRecorder.isTypeSupported('video/webm;codecs=vp8');
+    
+    try {
+      if (mp4Supported) {
+        mediaRecorder = new MediaRecorder(canvasStream, { 
+          mimeType: 'video/mp4;codecs=h264' 
+        });
+        actualMimeType = 'video/mp4';
+      } else if (webmVP9Supported) {
+        mediaRecorder = new MediaRecorder(canvasStream, { 
+          mimeType: 'video/webm;codecs=vp9' 
+        });
+        actualMimeType = 'video/webm';
+      } else if (webmVP8Supported) {
+        mediaRecorder = new MediaRecorder(canvasStream, { 
+          mimeType: 'video/webm;codecs=vp8' 
+        });
+        actualMimeType = 'video/webm';
+      } else {
+        mediaRecorder = new MediaRecorder(canvasStream);
+        actualMimeType = 'video/webm'; // Default fallback
+      }
+    } catch (e) {
+      mediaRecorder = new MediaRecorder(canvasStream);
+      actualMimeType = 'video/webm';
+    }
+    
+    mediaRecorder.ondataavailable = (e) => { 
+      if (e.data && e.data.size) recordedBlobs.push(e.data); 
+    };
+    
+    mediaRecorder.onstop = () => {
+      const extension = actualMimeType.includes('mp4') ? 'mp4' : 'webm';
+      
+      console.log(`Video exported as: ${actualMimeType} (.${extension})`);
+      
+      const blob = new Blob(recordedBlobs, { type: actualMimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); 
+      a.href = url; 
+      a.download = `ascii_video.${extension}`; 
+      a.click();
+      URL.revokeObjectURL(url);
+      
+      snapshotBtn.textContent = 'Save';
+      snapshotBtn.disabled = false;
+    };
+    
+    // Start recording
+    mediaRecorder.start();
+    
+    // Reset video to beginning and play through entire duration
+    vidElement.currentTime = 0;
+    await new Promise(resolve => {
+      vidElement.addEventListener('seeked', resolve, { once: true });
+    });
+    
+    vidElement.play();
+    
+    // Stop recording after video duration + buffer
+    setTimeout(() => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    }, (duration + 0.5) * 1000); // Add 500ms buffer
+    
+  } catch (error) {
+    console.error('Export failed:', error);
+    snapshotBtn.textContent = 'Save';
+    snapshotBtn.disabled = false;
+    alert('Export failed. Please try again.');
+  }
+}
+
+/* ==== init default theme values ==== */
+(function initDefaults(){
+  asciiMaterial.uniforms.uCell.value = Number(cellRange.value);
+  asciiMaterial.uniforms.uColorize.value = colorizeCheckbox.checked ? 1.0 : 0.0;
+  asciiMaterial.uniforms.uGamma.value = Number(gammaRange.value);
+  asciiMaterial.uniforms.uEdgeThreshold.value = Number(edgeThresholdRange.value);
+  asciiMaterial.uniforms.uDrawEdges.value = drawEdgesCheckbox.checked;
+  asciiMaterial.uniforms.uDrawFill.value = drawFillCheckbox.checked;
+  
+  // Set default theme to OneDark
+  themeSelect.value = 'onedark';
+  themeSelect.dispatchEvent(new Event('change'));
+})();
+
+</script>
+</body>
+</html>
