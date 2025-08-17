@@ -36,6 +36,7 @@ Open your browser, upload an image, and adjust the sliders to customize your ASC
 
 ![Image 5](images/5.png)
 
----
 
-**Created by sudo-sidd**
+#### Example 5
+
+![Image 6](images/6.png)
