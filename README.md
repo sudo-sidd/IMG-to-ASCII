@@ -1,4 +1,4 @@
-# MG-to-ASCII
+# IMG-to-ASCII
 
 Convert any image into colorful ASCII art. This tool takes your photos and turns them into text characters while keeping all the original colors, creating stunning visual art that works in web browsers.
 
