@@ -4,91 +4,622 @@
 <meta charset="utf-8"/>
 <title>ASCII Shader Converter — WebGL (Three.js)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
-  html,body { height:100%; margin:0; background:#050507; color:#cbd5e1; font-family: monospace; }
-  #ui { position: absolute; z-index: 30; left: 12px; top: 12px; background: rgba(0,0,0,0.8); padding:12px; border-radius:8px; backdrop-filter: blur(4px); max-height: calc(100vh - 24px); overflow-y: auto; }
-  label { display:block; margin:6px 0 4px; font-size:13px; color:#cbd5e1; }
-  input[type=range] { width:220px; }
-  button, select, input { font-family: monospace; font-size:13px; }
-  #drop { width:280px; height:42px; display:flex; align-items:center; justify-content:center; border:1px dashed rgba(255,255,255,0.08); margin-bottom:8px; color: #9ca3af; cursor:pointer; }
-  
-  #mainContainer { display: flex; width: 100vw; height: 100vh; }
-  #leftPanel { flex: 1; display: flex; flex-direction: column; }
-  #rightPanel { flex: 1; display: flex; flex-direction: column; }
-  
-  #originalContainer, #asciiContainer { 
-    flex: 1; 
-    position: relative; 
-    overflow: hidden; 
-    border: 1px solid rgba(255,255,255,0.1);
+  :root {
+    --bg:       #030a03;
+    --panel-bg: #030a03;
+    --fg:       #33ff33;
+    --fg-dim:   #1a8c1a;
+    --fg-bright:#aaff44;
+    --border:   #1a5c1a;
+    --border-hi:#33ff33;
+    --glow:     0 0 6px #33ff33, 0 0 12px rgba(51,255,51,0.4);
+    --glow-sm:  0 0 4px rgba(51,255,51,0.6);
+    --font:     'Share Tech Mono', 'Courier New', Courier, monospace;
   }
-  
-  #originalCanvas, #asciiCanvas { 
-    width: 100%; 
-    height: 100%; 
-    object-fit: contain; 
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font);
+    overflow: hidden;
+  }
+
+  /* CRT scanline + vignette overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    background:
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 2px,
+        rgba(0,0,0,0.18) 2px,
+        rgba(0,0,0,0.18) 4px
+      ),
+      radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* Scrollbar */
+  #ui::-webkit-scrollbar { width: 6px; }
+  #ui::-webkit-scrollbar-track { background: #000; }
+  #ui::-webkit-scrollbar-thumb { background: var(--border); }
+  #ui::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
+
+  /* Sidebar */
+  #ui {
+    position: absolute;
+    z-index: 30;
+    left: 12px;
+    top: 12px;
+    width: 300px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 16px;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-sizing: border-box;
+    box-shadow: var(--glow);
+  }
+
+  /* Sidebar header bar */
+  #ui::before {
+    content: '[ ASCII-CONVERTER v2.0 ]';
+    display: block;
+    color: var(--fg-bright);
+    font-size: 11px;
+    letter-spacing: 2px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+    margin-bottom: -4px;
+    text-shadow: var(--glow-sm);
+  }
+
+  .panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+  }
+
+  .panel-section:last-of-type {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--fg-dim);
+    font-weight: normal;
+  }
+
+  .section-title::before { content: '> '; color: var(--fg); }
+
+  /* Drop area */
+  #drop {
+    width: 100%;
+    height: 70px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--border-hi);
+    color: var(--fg-dim);
+    cursor: pointer;
+    background: transparent;
+    transition: color 0.15s, border-color 0.15s;
+    font-size: 12px;
+    text-align: center;
+    padding: 0 12px;
+    box-sizing: border-box;
+    gap: 4px;
+  }
+
+  #drop:hover {
+    color: var(--fg-bright);
+    border-color: var(--fg-bright);
+    text-shadow: var(--glow-sm);
+  }
+
+  /* Labels */
+  label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+
+  label span {
+    color: var(--fg-bright);
+    text-shadow: var(--glow-sm);
+  }
+
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* Range slider */
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    background: transparent;
+  }
+
+  input[type=range]:focus { outline: none; }
+
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 3px;
+    background: var(--border);
+    border: none;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 13px;
+    width: 7px;
+    border-radius: 0;
+    background: var(--fg);
+    cursor: pointer;
+    margin-top: -5px;
+    box-shadow: var(--glow-sm);
+  }
+
+  input[type=range]::-webkit-slider-thumb:hover {
+    background: var(--fg-bright);
+  }
+
+  /* Checkbox */
+  input[type=checkbox] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--fg-dim);
+    border-radius: 0;
+    outline: none;
+    cursor: pointer;
+    background: transparent;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  input[type=checkbox]:checked {
+    background: transparent;
+    border-color: var(--fg);
+    box-shadow: var(--glow-sm);
+  }
+
+  input[type=checkbox]:checked::after {
+    content: 'X';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--fg);
+    font-size: 10px;
+    font-family: var(--font);
+    text-shadow: var(--glow-sm);
+  }
+
+  /* Select */
+  select {
+    width: 100%;
+    padding: 5px 8px;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    color: var(--fg);
+    font-family: var(--font);
+    font-size: 12px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  select:focus {
+    border-color: var(--fg);
+    box-shadow: var(--glow-sm);
+  }
+
+  optgroup, option {
+    background: #000;
+    color: var(--fg);
+  }
+
+  /* Button container */
+  .btn-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  button {
+    padding: 8px 12px;
+    border-radius: 0;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: var(--font);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.12s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  button:hover {
+    border-color: var(--fg);
+    color: var(--fg);
+    text-shadow: var(--glow-sm);
+    box-shadow: inset 0 0 10px rgba(51,255,51,0.06);
+  }
+
+  button:active { background: rgba(51,255,51,0.08); }
+
+  /* Copy button — bright accent */
+  #copyText {
+    border-color: var(--fg);
+    color: var(--fg);
+    text-shadow: var(--glow-sm);
+    box-shadow: var(--glow-sm);
+    letter-spacing: 1.5px;
+  }
+
+  #copyText:hover {
+    background: rgba(51,255,51,0.1);
+    box-shadow: var(--glow);
+  }
+
+  /* Preset chips */
+  .preset-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .preset-chip {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: var(--font);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+    border-radius: 0;
+  }
+
+  .preset-chip:hover {
+    border-color: var(--fg);
+    color: var(--fg);
+    text-shadow: var(--glow-sm);
+  }
+
+  .preset-chip.active {
+    border-color: var(--fg-bright);
+    color: var(--fg-bright);
+    background: rgba(51,255,51,0.07);
+    text-shadow: var(--glow-sm);
+  }
+
+  /* Number input */
+  .res-custom-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+    align-items: center;
+  }
+
+  input[type=number] {
+    width: 100%;
+    padding: 5px 8px;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    color: var(--fg);
+    font-family: var(--font);
+    font-size: 12px;
+    outline: none;
+    box-sizing: border-box;
+    -moz-appearance: textfield;
+  }
+
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+  input[type=number]:focus {
+    border-color: var(--fg);
+    box-shadow: var(--glow-sm);
+  }
+
+  .apply-btn {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: var(--font);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+    border-radius: 0;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .apply-btn:hover {
+    border-color: var(--fg);
+    color: var(--fg);
+    text-shadow: var(--glow-sm);
+  }
+
+  .res-info {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-family: var(--font);
+    text-align: right;
+  }
+
+  /* Main layout */
+  #mainContainer {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    padding-left: 324px;
+    box-sizing: border-box;
+  }
+
+  #leftPanel, #rightPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    box-sizing: border-box;
+    gap: 8px;
+  }
+
+  #originalContainer, #asciiContainer {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #000;
+  }
+
+  #originalCanvas, #asciiCanvas {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
     object-position: center;
-    background: #111;
     display: block;
   }
-  
+
   .panelLabel {
-    background: rgba(0,0,0,0.8);
-    color: #cbd5e1;
-    padding: 8px 12px;
-    font-size: 14px;
-    font-weight: bold;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
+    color: var(--fg);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-shadow: var(--glow-sm);
   }
-  
-  footer { position: absolute; right: 12px; bottom:12px; z-index:40; color:#9ca3af; font-size:12px; }
-  .themeBtn { margin-right:6px; }
+
+  .panelLabel::before { content: '>> '; }
+
+  footer {
+    position: absolute;
+    right: 16px;
+    bottom: 12px;
+    z-index: 40;
+    color: var(--fg-dim);
+    font-family: var(--font);
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #000;
+    border: 1px solid var(--fg);
+    color: var(--fg);
+    padding: 10px 18px;
+    font-family: var(--font);
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-shadow: var(--glow-sm);
+    box-shadow: var(--glow);
+    z-index: 100;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  .toast.err {
+    border-color: #ff3333;
+    color: #ff4444;
+    box-shadow: 0 0 8px #ff3333;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
 </style>
 </head>
 <body>
+<div id="toast" class="toast">
+  <svg style="width: 18px; height: 18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="20 6 9 17 4 12"></polyline>
+  </svg>
+  <span id="toastMessage">ASCII copied!</span>
+</div>
+
 <div id="ui">
-  <div id="drop">Drop image / video here (or click)</div>
-  <input id="file" type="file" accept="video/*,image/*" style="display:none"/>
-  <label>Cell size: <span id="cellVal">8</span> px</label>
-  <input id="cell" type="range" min="4" max="24" value="8" />
-  <label>Colorize: <input id="colorize" type="checkbox" checked /></label>
-  <label>Gamma: <input id="gamma" type="range" min="0.2" max="2.5" step="0.05" value="1.0" /></label>
-  <label>Edge Threshold: <input id="edgeThreshold" type="range" min="0.01" max="0.5" step="0.01" value="0.1" /></label>
-  <label>Draw Edges: <input id="drawEdges" type="checkbox" checked /></label>
-  <label>Draw Fill: <input id="drawFill" type="checkbox" checked /></label>
-  <label>Theme:
-    <select id="theme">
-      <option value="none">None (Pure B&W)</option>
-      <optgroup label="Dark Themes">
-        <option value="onedark">OneDark</option>
-        <option value="catppuccin">Catppuccin</option>
-        <option value="solarized">Solarized</option>
-        <option value="gruvbox">Gruvbox</option>
-      </optgroup>
-      <optgroup label="High Contrast">
-        <option value="highcontrast">High Contrast</option>
-        <option value="highcontrastinv">High Contrast Inverted</option>
-        <option value="monochrome">Monochrome</option>
-        <option value="greyscale">Greyscale</option>
-      </optgroup>
-      <optgroup label="Soft Themes">
-        <option value="cream">Cream</option>
-        <option value="pastel">Pastel Blue</option>
-        <option value="sepia">Sepia</option>
-        <option value="sage">Sage Green</option>
-        <option value="lavender">Lavender</option>
-      </optgroup>
-    </select>
-  </label>
-  <div style="margin-top:8px;">
-    <button id="playPause">Play/Pause</button>
-    <button id="snapshot">Save</button>
+  <div class="panel-section">
+    <div id="drop">
+      <span style="letter-spacing:2px;">[ LOAD FILE ]</span>
+      <span style="font-size: 11px;">image / video &mdash; drop or click</span>
+    </div>
+    <input id="file" type="file" accept="video/*,image/*" style="display:none"/>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-title">Resolution / Scale</div>
+
+    <div class="control-group">
+      <label>Quick presets <span>(width)</span></label>
+      <div class="preset-chips">
+        <button class="preset-chip" data-w="320">320</button>
+        <button class="preset-chip" data-w="480">480</button>
+        <button class="preset-chip" data-w="640">640</button>
+        <button class="preset-chip" data-w="960">960</button>
+        <button class="preset-chip active" data-w="0">Original</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>Custom width (px)</label>
+      <div class="res-custom-row">
+        <input id="resWidth" type="number" min="64" max="4096" step="8" placeholder="e.g. 800" />
+        <button class="apply-btn" id="applyRes">Apply</button>
+      </div>
+      <div class="res-info" id="resInfo">—</div>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-title">Grid Configuration</div>
+    <div class="control-group">
+      <label>Cell size: <span id="cellVal">8</span> px</label>
+      <input id="cell" type="range" min="4" max="24" value="8" />
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-title">Visual Adjustments</div>
+    
+    <div class="control-group">
+      <label>Gamma: <span id="gammaVal">1.00</span></label>
+      <input id="gamma" type="range" min="0.2" max="2.5" step="0.05" value="1.0" />
+    </div>
+
+    <div class="control-group">
+      <label>Edge Threshold: <span id="edgeThresholdVal">0.10</span></label>
+      <input id="edgeThreshold" type="range" min="0.01" max="0.5" step="0.01" value="0.1" />
+    </div>
+
+    <div class="control-group" style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 4px;">
+      <label>Draw Edges</label>
+      <input id="drawEdges" type="checkbox" checked />
+    </div>
+
+    <div class="control-group" style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 4px;">
+      <label>Draw Fill</label>
+      <input id="drawFill" type="checkbox" checked />
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="section-title">Color & Theme</div>
+    
+    <div class="control-group" style="flex-direction: row; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+      <label>Colorize Output</label>
+      <input id="colorize" type="checkbox" checked />
+    </div>
+
+    <div class="control-group">
+      <label>Theme Preset</label>
+      <select id="theme">
+        <option value="none">None (Pure B&W)</option>
+        <optgroup label="Dark Themes">
+          <option value="onedark">OneDark</option>
+          <option value="catppuccin">Catppuccin</option>
+          <option value="solarized">Solarized</option>
+          <option value="gruvbox">Gruvbox</option>
+        </optgroup>
+        <optgroup label="High Contrast">
+          <option value="highcontrast">High Contrast</option>
+          <option value="highcontrastinv">High Contrast Inverted</option>
+          <option value="monochrome">Monochrome</option>
+          <option value="greyscale">Greyscale</option>
+        </optgroup>
+        <optgroup label="Soft Themes">
+          <option value="cream">Cream</option>
+          <option value="pastel">Pastel Blue</option>
+          <option value="sepia">Sepia</option>
+          <option value="sage">Sage Green</option>
+          <option value="lavender">Lavender</option>
+        </optgroup>
+      </select>
+    </div>
+  </div>
+
+  <div class="btn-container">
+    <div class="btn-row">
+      <button id="playPause">
+        <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+        Play
+      </button>
+      <button id="snapshot">
+        <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Save
+      </button>
+    </div>
+    <button id="copyText">
+      <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      Copy ASCII
+    </button>
   </div>
 </div>
 
 <div id="mainContainer">
   <div id="leftPanel">
-    <div class="panelLabel">Original</div>
+    <div class="panelLabel">Original Source</div>
     <div id="originalContainer">
       <canvas id="originalCanvas"></canvas>
     </div>
@@ -135,6 +666,11 @@ const playPauseBtn = document.getElementById('playPause');
 const snapshotBtn = document.getElementById('snapshot');
 
 let currentFile = null;
+let currentSource = null;
+let rawImageElement = null;   // original Image element for re-scaling
+let originalImageW = 0;       // native width of loaded image
+let originalImageH = 0;       // native height of loaded image
+let activeScaleW = 0;         // 0 = use original
 
 /* ==== Three.js setup ==== */
 let renderer, scene, camera, quadMesh, asciiMaterial;
@@ -408,6 +944,9 @@ function createDefaultTexture() {
   originalQuad.material.uniforms.uTexture.value = defaultTexture;
   originalQuad.material.uniforms.uAspect.value = 1.0; // Square aspect ratio
   originalQuad.material.needsUpdate = true;
+  
+  // Save source for CPU side ASCII copying
+  currentSource = canvas;
 }
 
 function onResize(){
@@ -486,11 +1025,29 @@ function loadVideo(src){
     originalQuad.material.uniforms.uAspect.value = aspectRatio;
     originalQuad.material.needsUpdate = true;
     
+    // Save source for CPU side ASCII copying
+    currentSource = vidElement;
+    
     // Resize canvases to match new image resolution
     onResize();
     
     vidElement.play();
-    drop.textContent = 'Video loaded — playing (click Play/Pause to control)';
+    drop.innerHTML = `
+      <svg style="width: 18px; height: 18px; margin-bottom: 4px; color: #10b981;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      </svg>
+      <span>Video Loaded</span>
+    `;
+    
+    // Update Play/Pause button state
+    playPauseBtn.innerHTML = `
+      <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16"></rect>
+        <rect x="14" y="4" width="4" height="16"></rect>
+      </svg>
+      Pause
+    `;
   });
 }
 
@@ -501,35 +1058,21 @@ function loadImage(src){
   img.onload = ()=> {
     inputIsVideo = false;
     if(imageTexture) imageTexture.dispose();
-    
-    // Update image resolution uniform
-    asciiMaterial.uniforms.uImageRes.value.set(img.width, img.height);
-    
-    // Calculate aspect ratio for original display
-    const aspectRatio = img.width / img.height;
-    
-    // Create a canvas to ensure proper texture creation
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    
-    imageTexture = new THREE.CanvasTexture(canvas);
-    imageTexture.minFilter = THREE.LinearFilter;
-    imageTexture.magFilter = THREE.LinearFilter;
-    imageTexture.needsUpdate = true;
-    
-    // Set texture for both ASCII and original display
-    asciiMaterial.uniforms.uInput.value = imageTexture;
-    originalQuad.material.uniforms.uTexture.value = imageTexture;
-    originalQuad.material.uniforms.uAspect.value = aspectRatio;
-    originalQuad.material.needsUpdate = true;
-    
-    // Resize canvases to match new image resolution
-    onResize();
-    
-    drop.textContent = 'Image loaded';
+
+    // Store raw image for re-scaling later
+    rawImageElement = img;
+    originalImageW = img.width;
+    originalImageH = img.height;
+
+    applyImageScale(activeScaleW, true /* first load */);
+
+    drop.innerHTML = `
+      <svg style="width: 18px; height: 18px; margin-bottom: 4px; color: #10b981;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      </svg>
+      <span>Image Loaded</span>
+    `;
   };
   img.onerror = (e) => {
     console.error('Failed to load image:', e);
@@ -538,15 +1081,108 @@ function loadImage(src){
   img.src = src;
 }
 
+/**
+ * Re-sample rawImageElement to targetW pixels wide (aspect-preserving).
+ * targetW = 0 means use the original resolution.
+ * When firstLoad = true the texture disposal is skipped (already done by caller).
+ */
+function applyImageScale(targetW, firstLoad = false) {
+  if (!rawImageElement) return;
+
+  const srcW = originalImageW;
+  const srcH = originalImageH;
+  const dstW = (targetW > 0 && targetW < srcW) ? targetW : srcW;
+  const dstH = Math.round(dstW * srcH / srcW);
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = dstW;
+  canvas.height = dstH;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(rawImageElement, 0, 0, dstW, dstH);
+
+  if (!firstLoad && imageTexture) imageTexture.dispose();
+
+  imageTexture = new THREE.CanvasTexture(canvas);
+  imageTexture.minFilter = THREE.LinearFilter;
+  imageTexture.magFilter = THREE.LinearFilter;
+  imageTexture.needsUpdate = true;
+
+  const aspectRatio = dstW / dstH;
+
+  asciiMaterial.uniforms.uImageRes.value.set(dstW, dstH);
+  asciiMaterial.uniforms.uInput.value = imageTexture;
+  originalQuad.material.uniforms.uTexture.value = imageTexture;
+  originalQuad.material.uniforms.uAspect.value = aspectRatio;
+  originalQuad.material.needsUpdate = true;
+
+  currentSource = canvas;
+
+  onResize();
+
+  // Update info text
+  const resInfo = document.getElementById('resInfo');
+  if (resInfo) {
+    resInfo.textContent = `${dstW} × ${dstH} px`;
+  }
+}
+
 /* ==== UI controls wiring ==== */
 const cellRange = document.getElementById('cell');
 const cellVal = document.getElementById('cellVal');
 const colorizeCheckbox = document.getElementById('colorize');
 const gammaRange = document.getElementById('gamma');
+const gammaVal = document.getElementById('gammaVal');
 const edgeThresholdRange = document.getElementById('edgeThreshold');
+const edgeThresholdVal = document.getElementById('edgeThresholdVal');
 const drawEdgesCheckbox = document.getElementById('drawEdges');
 const drawFillCheckbox = document.getElementById('drawFill');
 const themeSelect = document.getElementById('theme');
+const copyTextBtn = document.getElementById('copyText');
+const toast = document.getElementById('toast');
+const toastMessage = document.getElementById('toastMessage');
+
+/* ==== Resolution preset chips ==== */
+const presetChips = document.querySelectorAll('.preset-chip');
+const resWidthInput = document.getElementById('resWidth');
+const applyResBtn = document.getElementById('applyRes');
+
+function setActiveChip(chip) {
+  presetChips.forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+}
+
+presetChips.forEach(chip => {
+  chip.addEventListener('click', () => {
+    if (inputIsVideo) {
+      showToastNotification('Scale applies to images only — video uses native res', 'error');
+      return;
+    }
+    const w = parseInt(chip.dataset.w, 10);
+    activeScaleW = w;
+    resWidthInput.value = w > 0 ? w : '';
+    setActiveChip(chip);
+    applyImageScale(w);
+  });
+});
+
+function applyCustomRes() {
+  if (inputIsVideo) {
+    showToastNotification('Scale applies to images only — video uses native res', 'error');
+    return;
+  }
+  const w = parseInt(resWidthInput.value, 10);
+  if (!w || w < 64 || w > 4096) {
+    showToastNotification('Enter a width between 64 and 4096 px', 'error');
+    return;
+  }
+  activeScaleW = w;
+  // Deactivate all preset chips (custom value)
+  presetChips.forEach(c => c.classList.remove('active'));
+  applyImageScale(w);
+}
+
+applyResBtn.addEventListener('click', applyCustomRes);
+resWidthInput.addEventListener('keydown', e => { if (e.key === 'Enter') applyCustomRes(); });
 
 cellRange.addEventListener('input', ()=>{
   const v = Number(cellRange.value);
@@ -565,9 +1201,17 @@ colorizeCheckbox.addEventListener('change', ()=>{
   }
 });
 
-gammaRange.addEventListener('input', ()=> asciiMaterial.uniforms.uGamma.value = Number(gammaRange.value));
+gammaRange.addEventListener('input', () => {
+  const v = Number(gammaRange.value);
+  gammaVal.textContent = v.toFixed(2);
+  asciiMaterial.uniforms.uGamma.value = v;
+});
 
-edgeThresholdRange.addEventListener('input', ()=> asciiMaterial.uniforms.uEdgeThreshold.value = Number(edgeThresholdRange.value));
+edgeThresholdRange.addEventListener('input', () => {
+  const v = Number(edgeThresholdRange.value);
+  edgeThresholdVal.textContent = v.toFixed(2);
+  asciiMaterial.uniforms.uEdgeThreshold.value = v;
+});
 
 drawEdgesCheckbox.addEventListener('change', ()=>{
   asciiMaterial.uniforms.uDrawEdges.value = drawEdgesCheckbox.checked;
@@ -586,7 +1230,7 @@ themeSelect.addEventListener('change', ()=>{
     asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0); // Pure black background
     asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1); // Pure white foreground
     asciiMaterial.uniforms.uColorize.value = 0.0; // Disable colorization
-    document.getElementById('colorize').checked = false;
+    colorizeCheckbox.checked = false;
   } else {
     // Apply selected theme colors
     asciiMaterial.uniforms.uPalette0.value.set(
@@ -602,7 +1246,7 @@ themeSelect.addEventListener('change', ()=>{
     // Re-enable colorization if it was disabled
     if (asciiMaterial.uniforms.uColorize.value === 0.0) {
       asciiMaterial.uniforms.uColorize.value = 1.0;
-      document.getElementById('colorize').checked = true;
+      colorizeCheckbox.checked = true;
     }
   }
 });
@@ -628,10 +1272,21 @@ playPauseBtn.addEventListener('click', ()=>{
   if(!vidElement || !inputIsVideo) return;
   if(vidElement.paused){ 
     vidElement.play(); 
-    playPauseBtn.textContent='Pause'; 
+    playPauseBtn.innerHTML = `
+      <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16"></rect>
+        <rect x="14" y="4" width="4" height="16"></rect>
+      </svg>
+      Pause
+    `; 
   } else { 
     vidElement.pause(); 
-    playPauseBtn.textContent='Play'; 
+    playPauseBtn.innerHTML = `
+      <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="currentColor">
+        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+      </svg>
+      Play
+    `; 
   }
 });
 
@@ -653,15 +1308,20 @@ snapshotBtn.addEventListener('click', ()=>{
 async function exportVideoAsMP4() {
   if (!vidElement) return;
   
-  // Show progress
-  snapshotBtn.textContent = 'Processing...';
+  // Show progress with spinner
+  const originalBtnHTML = snapshotBtn.innerHTML;
+  snapshotBtn.innerHTML = `
+    <svg style="width: 14px; height: 14px; animation: spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+      <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"></path>
+    </svg>
+    Processing...
+  `;
   snapshotBtn.disabled = true;
   
   try {
-    // Get video duration and dimensions
     const duration = vidElement.duration;
     const fps = 30;
-    const totalFrames = Math.ceil(duration * fps);
     
     // Create MediaRecorder for the export
     const canvasStream = asciiCanvas.captureStream(fps);
@@ -670,30 +1330,24 @@ async function exportVideoAsMP4() {
     let mediaRecorder;
     let actualMimeType = '';
     
-    // Check what formats are actually supported
+    // Check what formats are supported
     const mp4Supported = MediaRecorder.isTypeSupported('video/mp4;codecs=h264');
     const webmVP9Supported = MediaRecorder.isTypeSupported('video/webm;codecs=vp9');
     const webmVP8Supported = MediaRecorder.isTypeSupported('video/webm;codecs=vp8');
     
     try {
       if (mp4Supported) {
-        mediaRecorder = new MediaRecorder(canvasStream, { 
-          mimeType: 'video/mp4;codecs=h264' 
-        });
+        mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/mp4;codecs=h264' });
         actualMimeType = 'video/mp4';
       } else if (webmVP9Supported) {
-        mediaRecorder = new MediaRecorder(canvasStream, { 
-          mimeType: 'video/webm;codecs=vp9' 
-        });
+        mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm;codecs=vp9' });
         actualMimeType = 'video/webm';
       } else if (webmVP8Supported) {
-        mediaRecorder = new MediaRecorder(canvasStream, { 
-          mimeType: 'video/webm;codecs=vp8' 
-        });
+        mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm;codecs=vp8' });
         actualMimeType = 'video/webm';
       } else {
         mediaRecorder = new MediaRecorder(canvasStream);
-        actualMimeType = 'video/webm'; // Default fallback
+        actualMimeType = 'video/webm';
       }
     } catch (e) {
       mediaRecorder = new MediaRecorder(canvasStream);
@@ -706,9 +1360,6 @@ async function exportVideoAsMP4() {
     
     mediaRecorder.onstop = () => {
       const extension = actualMimeType.includes('mp4') ? 'mp4' : 'webm';
-      
-      console.log(`Video exported as: ${actualMimeType} (.${extension})`);
-      
       const blob = new Blob(recordedBlobs, { type: actualMimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); 
@@ -717,14 +1368,13 @@ async function exportVideoAsMP4() {
       a.click();
       URL.revokeObjectURL(url);
       
-      snapshotBtn.textContent = 'Save';
+      snapshotBtn.innerHTML = originalBtnHTML;
       snapshotBtn.disabled = false;
     };
     
     // Start recording
     mediaRecorder.start();
     
-    // Reset video to beginning and play through entire duration
     vidElement.currentTime = 0;
     await new Promise(resolve => {
       vidElement.addEventListener('seeked', resolve, { once: true });
@@ -732,27 +1382,237 @@ async function exportVideoAsMP4() {
     
     vidElement.play();
     
-    // Stop recording after video duration + buffer
     setTimeout(() => {
       if (mediaRecorder && mediaRecorder.state === 'recording') {
         mediaRecorder.stop();
       }
-    }, (duration + 0.5) * 1000); // Add 500ms buffer
+    }, (duration + 0.5) * 1000);
     
   } catch (error) {
     console.error('Export failed:', error);
-    snapshotBtn.textContent = 'Save';
+    snapshotBtn.innerHTML = originalBtnHTML;
     snapshotBtn.disabled = false;
-    alert('Export failed. Please try again.');
+    showToastNotification('Export failed. Try again.', 'error');
   }
 }
+
+/* ==== Copy ASCII Text ==== */
+function showToastNotification(message, type = 'success') {
+  toastMessage.textContent = message;
+  toast.classList.remove('err');
+  if (type === 'error') {
+    toast.classList.add('err');
+  }
+  toast.classList.add('show');
+  setTimeout(() => {
+    toast.classList.remove('show');
+    toast.classList.remove('err');
+  }, 2500);
+}
+
+copyTextBtn.addEventListener('click', async () => {
+  if (!currentSource) {
+    showToastNotification('No source loaded to copy', 'error');
+    return;
+  }
+  
+  const originalHTML = copyTextBtn.innerHTML;
+  copyTextBtn.innerHTML = `
+    <svg style="width: 14px; height: 14px; animation: spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+      <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"></path>
+    </svg>
+    Generating...
+  `;
+  copyTextBtn.disabled = true;
+  
+  try {
+    const cellSize = Number(cellRange.value);
+    
+    // Get source dimensions
+    let sourceWidth = 256;
+    let sourceHeight = 256;
+    
+    if (inputIsVideo && vidElement) {
+      sourceWidth = vidElement.videoWidth;
+      sourceHeight = vidElement.videoHeight;
+    } else if (currentSource instanceof HTMLCanvasElement) {
+      sourceWidth = currentSource.width;
+      sourceHeight = currentSource.height;
+    }
+    
+    const cols = Math.floor(sourceWidth / cellSize);
+    const rows = Math.floor(sourceHeight / cellSize);
+    
+    if (cols <= 0 || rows <= 0) {
+      throw new Error('Invalid grid size');
+    }
+    
+    // Create temporary canvas to downscale source to grid resolution
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = cols;
+    tempCanvas.height = rows;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(currentSource, 0, 0, cols, rows);
+    
+    const imgData = tempCtx.getImageData(0, 0, cols, rows);
+    const data = imgData.data;
+    
+    const gamma = Number(gammaRange.value);
+    const drawEdges = drawEdgesCheckbox.checked;
+    const drawFill = drawFillCheckbox.checked;
+    const edgeThreshold = Number(edgeThresholdRange.value);
+    
+    // Calculate luminance values for grid cells
+    const lums = new Float32Array(cols * rows);
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const idx = (y * cols + x) * 4;
+        const r = data[idx] / 255;
+        const g = data[idx+1] / 255;
+        const b = data[idx+2] / 255;
+        const lum = 0.2127 * r + 0.7152 * g + 0.0722 * b;
+        lums[y * cols + x] = Math.pow(Math.max(0.00001, lum), 1.0 / gamma);
+      }
+    }
+    
+    const getLum = (cx, cy) => {
+      const x = Math.max(0, Math.min(cols - 1, cx));
+      const y = Math.max(0, Math.min(rows - 1, cy));
+      return lums[y * cols + x];
+    };
+    
+    // Match the glyph textures used in the WebGL shader
+    const fillChars = [' ', '.', ':', 'c', 'o', 'p', '0', '?', '&', '@'];
+    const edgeChars = [' ', '|', '-', '/', '\\'];
+    
+    let plainText = '';
+    let htmlContent = '';
+    
+    const isColorized = colorizeCheckbox.checked;
+    const currentTheme = themeSelect.value;
+    const themeColors = THEMES[currentTheme] || { bg: '#000000', fg: '#ffffff' };
+    
+    for (let y = 0; y < rows; y++) {
+      let plainLine = '';
+      let htmlLine = '';
+      
+      for (let x = 0; x < cols; x++) {
+        let char = ' ';
+        
+        if (drawEdges) {
+          // Sobel edge filter on CPU
+          const tl = getLum(x - 1, y - 1);
+          const tm = getLum(x, y - 1);
+          const tr = getLum(x + 1, y - 1);
+          const ml = getLum(x - 1, y);
+          const mr = getLum(x + 1, y);
+          const bl = getLum(x - 1, y + 1);
+          const bm = getLum(x, y + 1);
+          const br = getLum(x + 1, y + 1);
+          
+          const gx = (tr + 2 * mr + br) - (tl + 2 * ml + bl);
+          const gy = (bl + 2 * bm + br) - (tl + 2 * tm + tr);
+          
+          const edgeMag = Math.sqrt(gx * gx + gy * gy);
+          
+          if (edgeMag > edgeThreshold) {
+            const theta = Math.atan2(gy, gx);
+            const absTheta = Math.abs(theta) / Math.PI;
+            let direction = -1;
+            
+            if ((absTheta >= 0.0 && absTheta < 0.05) || (absTheta > 0.9 && absTheta <= 1.0)) {
+              direction = 1; // Vertical
+            } else if (absTheta > 0.45 && absTheta < 0.55) {
+              direction = 2; // Horizontal
+            } else if (absTheta > 0.05 && absTheta < 0.45) {
+              direction = theta > 0.0 ? 4 : 3;
+            } else if (absTheta > 0.55 && absTheta < 0.9) {
+              direction = theta > 0.0 ? 3 : 4;
+            }
+            
+            if (direction >= 1) {
+              char = edgeChars[direction];
+            }
+          }
+        }
+        
+        if (char === ' ' && drawFill) {
+          const lum = lums[y * cols + x];
+          const quantizedLum = Math.max(0, Math.min(9, Math.floor(lum * 10)));
+          char = fillChars[quantizedLum];
+        }
+        
+        plainLine += char;
+        
+        // Build colorized HTML segment
+        let htmlChar = char;
+        if (char === ' ') htmlChar = ' ';
+        else if (char === '<') htmlChar = '&lt;';
+        else if (char === '>') htmlChar = '&gt;';
+        else if (char === '&') htmlChar = '&amp;';
+        
+        if (isColorized && currentTheme !== 'none') {
+          const idx = (y * cols + x) * 4;
+          const r = data[idx];
+          const g = data[idx+1];
+          const b = data[idx+2];
+          htmlLine += `<span style="color: rgb(${r},${g},${b});">${htmlChar}</span>`;
+        } else {
+          htmlLine += htmlChar;
+        }
+      }
+      
+      plainText += plainLine + '\n';
+      htmlContent += htmlLine + '\n';
+    }
+    
+    // Rich HTML representation to preserve style when pasting in RTFs (Word, Google Docs, Slack etc.)
+    const fullHtml = `<pre style="font-family: 'JetBrains Mono', monospace, Courier; font-size: 8px; line-height: 1.0; letter-spacing: 0px; background-color: ${themeColors.bg}; color: ${themeColors.fg}; padding: 16px; border-radius: 8px; margin: 0; white-space: pre; word-wrap: normal;">${htmlContent}</pre>`;
+    
+    const textBlob = new Blob([plainText], { type: 'text/plain' });
+    const htmlBlob = new Blob([fullHtml], { type: 'text/html' });
+    
+    const clipboardItem = new ClipboardItem({
+      'text/plain': textBlob,
+      'text/html': htmlBlob
+    });
+    
+    await navigator.clipboard.write([clipboardItem]);
+    showToastNotification('ASCII copied! (Plain text + Colors)');
+    
+    copyTextBtn.innerHTML = `
+      <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      Copied!
+    `;
+    setTimeout(() => {
+      copyTextBtn.innerHTML = originalHTML;
+      copyTextBtn.disabled = false;
+    }, 2000);
+    
+  } catch (err) {
+    console.error('Failed to copy ASCII:', err);
+    showToastNotification('Clipboard write failed', 'error');
+    copyTextBtn.innerHTML = originalHTML;
+    copyTextBtn.disabled = false;
+  }
+});
 
 /* ==== init default theme values ==== */
 (function initDefaults(){
   asciiMaterial.uniforms.uCell.value = Number(cellRange.value);
+  cellVal.textContent = cellRange.value;
+  
   asciiMaterial.uniforms.uColorize.value = colorizeCheckbox.checked ? 1.0 : 0.0;
+  
   asciiMaterial.uniforms.uGamma.value = Number(gammaRange.value);
+  gammaVal.textContent = Number(gammaRange.value).toFixed(2);
+  
   asciiMaterial.uniforms.uEdgeThreshold.value = Number(edgeThresholdRange.value);
+  edgeThresholdVal.textContent = Number(edgeThresholdRange.value).toFixed(2);
+  
   asciiMaterial.uniforms.uDrawEdges.value = drawEdgesCheckbox.checked;
   asciiMaterial.uniforms.uDrawFill.value = drawFillCheckbox.checked;
   
