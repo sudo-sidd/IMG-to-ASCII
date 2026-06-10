@@ -524,6 +524,35 @@
   </div>
 
   <div class="panel-section">
+    <div class="section-title">Background</div>
+    <div class="control-group" style="flex-direction: row; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+      <label>Model Quality</label>
+      <select id="bgQualitySelect" style="width: 120px;">
+        <option value="small">Small (Fast)</option>
+        <option value="medium">Medium (Balanced)</option>
+        <option value="large" selected>Large (Best)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <button id="removeBgBtn">
+        <svg style="width: 14px; height: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+        </svg>
+        Remove Background
+      </button>
+    </div>
+    <div class="control-group" style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 4px;">
+      <label>Bg Color</label>
+      <input id="bgColorPicker" type="color" value="#000000" style="padding: 0; width: 24px; height: 24px; background: transparent; border: 1px solid var(--border); cursor: pointer;" />
+    </div>
+    <div class="control-group" style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 4px;">
+      <label>Transparent</label>
+      <input id="bgTransparent" type="checkbox" checked />
+    </div>
+  </div>
+
+  <div class="panel-section">
     <div class="section-title">Grid Configuration</div>
     <div class="control-group">
       <label>Cell size: <span id="cellVal">8</span> px</label>
@@ -566,7 +595,8 @@
     <div class="control-group">
       <label>Theme Preset</label>
       <select id="theme">
-        <option value="none">None (Pure B&W)</option>
+        <option value="none">None (Full Color)</option>
+        <option value="bw">Black & White</option>
         <optgroup label="Dark Themes">
           <option value="onedark">OneDark</option>
           <option value="catppuccin">Catppuccin</option>
@@ -639,7 +669,8 @@
 <script>
 /* ==== Config and utility helpers ==== */
 const THEMES = {
-  none: { bg: '#000000', fg: '#ffffff', accent: '#808080' }, // No color theme - pure black/white
+  none: { bg: '#000000', fg: '#ffffff', accent: '#808080' },
+  bw: { bg: '#000000', fg: '#ffffff', accent: '#808080' },
   onedark: { bg: '#282c34', fg: '#abb2bf', accent: '#61afef' },
   catppuccin: { bg: '#1e1e2e', fg: '#cdd6f4', accent: '#f5c2e7' },
   solarized: { bg: '#002b36', fg: '#93a1a1', accent: '#b58900' },
@@ -1194,10 +1225,12 @@ colorizeCheckbox.addEventListener('change', ()=>{
   const isColorized = colorizeCheckbox.checked;
   asciiMaterial.uniforms.uColorize.value = isColorized ? 1.0 : 0.0;
   
-  // If user unchecks colorize while "none" theme is selected, keep it as pure B&W
   if (!isColorized && themeSelect.value === 'none') {
-    asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0); // Pure black
-    asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1); // Pure white
+    themeSelect.value = 'bw';
+    asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0);
+    asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1);
+  } else if (isColorized && themeSelect.value === 'bw') {
+    themeSelect.value = 'none';
   }
 });
 
@@ -1226,10 +1259,14 @@ themeSelect.addEventListener('change', ()=>{
   const p = THEMES[selectedTheme];
   
   if (selectedTheme === 'none') {
-    // No color theme - use pure black and white, disable colorization
-    asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0); // Pure black background
-    asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1); // Pure white foreground
-    asciiMaterial.uniforms.uColorize.value = 0.0; // Disable colorization
+    asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0);
+    asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1);
+    asciiMaterial.uniforms.uColorize.value = 1.0;
+    colorizeCheckbox.checked = true;
+  } else if (selectedTheme === 'bw') {
+    asciiMaterial.uniforms.uPalette0.value.set(0, 0, 0);
+    asciiMaterial.uniforms.uPalette1.value.set(1, 1, 1);
+    asciiMaterial.uniforms.uColorize.value = 0.0;
     colorizeCheckbox.checked = false;
   } else {
     // Apply selected theme colors
@@ -1599,6 +1636,92 @@ copyTextBtn.addEventListener('click', async () => {
     copyTextBtn.disabled = false;
   }
 });
+
+/* ==== Background Removal ==== */
+const removeBgBtn = document.getElementById('removeBgBtn');
+const bgColorPicker = document.getElementById('bgColorPicker');
+const bgTransparent = document.getElementById('bgTransparent');
+
+let bgRemovedBlob = null; // Store the ML output blob
+
+removeBgBtn.addEventListener('click', async () => {
+  if (inputIsVideo) {
+    showToastNotification('Background removal applies to images only', 'error');
+    return;
+  }
+  if (!rawImageElement) {
+    showToastNotification('Load an image first', 'error');
+    return;
+  }
+
+  const originalHTML = removeBgBtn.innerHTML;
+  removeBgBtn.innerHTML = `
+    <svg style="width: 14px; height: 14px; animation: spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+      <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"></path>
+    </svg>
+    Removing...
+  `;
+  removeBgBtn.disabled = true;
+
+  try {
+    const { removeBackground } = await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal/+esm');
+    
+    // Process the image with performance config
+    const quality = document.getElementById('bgQualitySelect').value;
+    bgRemovedBlob = await removeBackground(rawImageElement.src, {
+      model: quality,
+      device: 'gpu'
+    });
+    
+    applyBackgroundSettings();
+    showToastNotification('Background removed!');
+  } catch (err) {
+    console.error('BG removal failed:', err);
+    showToastNotification('Removal failed', 'error');
+  } finally {
+    removeBgBtn.innerHTML = originalHTML;
+    removeBgBtn.disabled = false;
+  }
+});
+
+function applyBackgroundSettings() {
+  if (!bgRemovedBlob) return;
+  
+  const url = URL.createObjectURL(bgRemovedBlob);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    
+    if (!bgTransparent.checked) {
+      ctx.fillStyle = bgColorPicker.value;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    ctx.drawImage(img, 0, 0);
+    
+    const newImg = new Image();
+    newImg.onload = () => {
+      rawImageElement = newImg;
+      originalImageW = newImg.width;
+      originalImageH = newImg.height;
+      applyImageScale(activeScaleW, false);
+    };
+    newImg.src = canvas.toDataURL('image/png');
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
+}
+
+bgColorPicker.addEventListener('input', () => {
+  if(bgTransparent.checked) {
+    bgTransparent.checked = false; // Auto-uncheck transparent if user picks a color
+  }
+  applyBackgroundSettings();
+});
+bgTransparent.addEventListener('change', applyBackgroundSettings);
 
 /* ==== init default theme values ==== */
 (function initDefaults(){
